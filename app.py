@@ -9,7 +9,28 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-KAKAO_WEBHOOK_URL = os.environ.get("KAKAO_WEBHOOK_URL", "")  # 카카오 응답 URL
+KAKAO_REST_API_KEY = os.environ.get("KAKAO_REST_API_KEY", "")
+
+def send_kakao_message(user_key, text):
+    """카카오 사용자에게 메시지 전송"""
+    try:
+        headers = {
+            "Authorization": f"KakaoAK {KAKAO_REST_API_KEY}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        # 너무 길면 자르기 (카톡 최대 1000자)
+        if len(text) > 900:
+            text = text[:900] + "\n\n...(요약 완료)"
+        data = {
+            "receiver_uuids": f'["{user_key}"]',
+            "template_object": f'{{"object_type":"text","text":"{text}","link":{{"web_url":"https://stock-kakao-bot-production.up.railway.app"}}}}'
+        }
+        requests.post(
+            "https://kapi.kakao.com/v1/api/talk/friends/message/send",
+            headers=headers, data=data, timeout=10
+        )
+    except Exception as e:
+        print(f"카카오 메시지 전송 실패: {e}")
 
 def run_claude(command):
     """Claude Code CLI 실행 후 결과 반환"""
@@ -20,9 +41,8 @@ def run_claude(command):
             encoding="utf-8"
         )
         output = result.stdout.strip()
-        # 너무 길면 요약 (카톡 최대 1000자)
         if len(output) > 900:
-            output = output[:900] + "\n\n...(전체 리포트는 Reports 폴더 확인)"
+            output = output[:900] + "\n\n...(요약 완료)"
         return output if output else "분석 결과를 가져오지 못했습니다."
     except subprocess.TimeoutExpired:
         return "⏱ 분석 시간 초과 (5분). 다시 시도해주세요."
@@ -70,28 +90,23 @@ def kakao_webhook():
 
     try:
         user_text = data["userRequest"]["utterance"]
+        user_key = data["userRequest"]["user"]["properties"].get("plusfriendUserKey", "")
     except (KeyError, TypeError):
         return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "오류가 발생했습니다."}}]}})
 
     command, loading_msg = parse_command(user_text)
 
     if command is None:
-        # 바로 응답 (도움말, 미인식)
         response_text = loading_msg
     else:
-        # Claude 실행 (백그라운드) → 일단 로딩 메시지 반환
+        # 백그라운드에서 Claude 실행 → 완료 후 카톡으로 결과 전송
         def run_and_respond():
             result = run_claude(command)
-            # 카카오는 비동기 응답 미지원 → 결과를 파일에 저장
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_dir = r"C:\Users\ssk13\OneDrive\Desktop\Reports"
-            os.makedirs(report_dir, exist_ok=True)
-            with open(f"{report_dir}\\kakao_{timestamp}.txt", "w", encoding="utf-8") as f:
-                f.write(result)
+            send_kakao_message(user_key, result)
 
         thread = threading.Thread(target=run_and_respond)
         thread.start()
-        response_text = f"{loading_msg}\n\n⏳ 분석 완료 후 Reports 폴더에 저장됩니다.\n(보통 2~5분 소요)"
+        response_text = f"{loading_msg}\n\n⏳ 분석 완료되면 카카오톡으로 결과를 보내드립니다.\n(보통 2~5분 소요)"
 
     return jsonify({
         "version": "2.0",
