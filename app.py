@@ -106,7 +106,7 @@ def kakao_webhook():
 
         thread = threading.Thread(target=run_and_respond)
         thread.start()
-        response_text = f"{loading_msg}\n\n⏳ 분석 완료되면 카카오톡으로 결과를 보내드립니다.\n(보통 2~5분 소요)"
+        response_text = f"{loading_msg}\n\n✅ 분석을 시작했습니다. 완료되면 이 채팅으로 결과를 전송합니다.\n예상 소요시간: 2~5분"
 
     return jsonify({
         "version": "2.0",
